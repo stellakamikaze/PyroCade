@@ -32,7 +32,7 @@ Every release has a universal macOS build that runs natively on Apple Silicon an
 
 The app isn't notarized by Apple yet, so the first time macOS says it can't verify the developer. Click **Done**, then open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to PyroCade. Later starts open normally.
 
-On macOS, settings and emulators are kept in `~/Library/Application Support/PyroCade/data`. The emulator downloader installs the official macOS builds, and *Use existing program…* accepts an app from your Applications folder. Cemu, PCSX2 and RPCS3 only publish Intel builds for macOS; on Apple Silicon they run through Rosetta. PyroCade shows the update banner on macOS; install the new `.dmg` from the release page to update.
+On macOS, settings and emulators are kept in `~/Library/Application Support/PyroCade/data`. The emulator downloader installs the official macOS builds, and *Use existing program…* accepts an app from your Applications folder. Cemu and PCSX2 only publish Intel builds for macOS; on Apple Silicon they run through Rosetta, and PyroCade tells you how to install it if it is missing. PyroCade shows the update banner on macOS; install the new `.dmg` from the release page to update.
 
 ## Run from source
     npm ci

@@ -17,6 +17,9 @@ permissions:
 
 env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  # Smoke test shared by the Linux and macOS jobs: the app loads and lists every catalog emulator.
+  SMOKE_JS: (async()=>JSON.stringify({version:await api.appVersion(),emulators:(await api.emuList()).filter(e=>e.managed).length,demo:!document.getElementById('demoBanner').classList.contains('hidden')}))()
+  SMOKE_EMULATORS: '"emulators":11'
 
 jobs:
   windows:
@@ -49,13 +52,13 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
           PYROCADE_SNAP: ${{ runner.temp }}/appimage.png
-          PYROCADE_JS: (async()=>JSON.stringify({version:await api.appVersion(),emulators:(await api.emuList()).filter(e=>e.managed).length,demo:!document.getElementById('demoBanner').classList.contains('hidden')}))()
+          PYROCADE_JS: ${{ env.SMOKE_JS }}
         run: |
           chmod +x dist/PyroCade-*.AppImage
           timeout 120 xvfb-run -a dist/PyroCade-*.AppImage --no-sandbox
           cat "$PYROCADE_SNAP.txt"; echo
           test -s "$PYROCADE_SNAP"
-          grep -q '"emulators":11' "$PYROCADE_SNAP.txt"
+          grep -q "$SMOKE_EMULATORS" "$PYROCADE_SNAP.txt"
       - name: Smoke test the .deb
         env:
           PYROCADE_SNAP: ${{ runner.temp }}/deb.png
@@ -90,12 +93,12 @@ jobs:
         timeout-minutes: 3
         env:
           PYROCADE_SNAP: ${{ runner.temp }}/mac.png
-          PYROCADE_JS: (async()=>JSON.stringify({version:await api.appVersion(),emulators:(await api.emuList()).filter(e=>e.managed).length,demo:!document.getElementById('demoBanner').classList.contains('hidden')}))()
+          PYROCADE_JS: ${{ env.SMOKE_JS }}
         run: |
           dist/mac-universal/PyroCade.app/Contents/MacOS/PyroCade
           cat "$PYROCADE_SNAP.txt"; echo
           test -s "$PYROCADE_SNAP"
-          grep -q '"emulators":11' "$PYROCADE_SNAP.txt"
+          grep -q "$SMOKE_EMULATORS" "$PYROCADE_SNAP.txt"
       - uses: actions/upload-artifact@v4
         with:
           name: mac

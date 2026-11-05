@@ -67,7 +67,11 @@
     "mac": {
       "repo": "RPCS3/rpcs3-binaries-mac",
       "asset": "_macos\\.7z$",
-      "exe": "^RPCS3.*\\.app$"
+      "exe": "^RPCS3.*\\.app$",
+      "arm64": {
+        "repo": "RPCS3/rpcs3-binaries-mac-arm64",
+        "asset": "_macos_aarch64\\.7z$"
+      }
     }
   },
   {
