@@ -90,7 +90,7 @@
     },
     "mac": {
       "asset": "^shadps4-macos-sdl-.*\\.zip$",
-      "exe": "^shadps4.*\\.app$"
+      "exe": "^shadps4$"
     }
   },
   {

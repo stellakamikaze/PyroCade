@@ -518,9 +518,10 @@ async function installEmu(id, send) {
     const exe = path.join(dest, exeRel);
     if (isMac) await run('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', exe]).catch(() => {});
     if (process.platform !== 'win32') await fsp.chmod(programOf(exe), 0o755);
-    // Versioned single-file programs (pcsx2-v2.8.2-….AppImage) would otherwise pile up.
+    // Versioned single-file programs (pcsx2-v2.8.2-….AppImage) and macOS bundles (PCSX2-v2.8.2.app)
+    // would otherwise pile up.
     const old = readManifest(id)?.exe;
-    if (old && old !== exeRel && !/[\\/]/.test(old) && /\.appimage$/i.test(old)) await fsp.rm(path.join(dest, old), { force: true });
+    if (old && old !== exeRel && !/[\\/]/.test(old) && (/\.appimage$/i.test(old) || isBundle(old))) await fsp.rm(path.join(dest, old), { recursive: true, force: true });
     const man = { ...rel, exe: exeRel, installedAt: new Date().toISOString() };
     delete man.notes;
     fs.writeFileSync(manifestPath(id), JSON.stringify(man, null, 2));
