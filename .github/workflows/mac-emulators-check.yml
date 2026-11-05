@@ -1,0 +1,36 @@
+# Fork-only check (not part of the PR): installs every catalog emulator on macOS through
+# PyroCade's own downloader and reports the bundle and program it found for each.
+name: Mac emulators check
+on:
+  push:
+    branches: [mac-ci-check]
+  workflow_dispatch:
+jobs:
+  install:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      # CI runners share GitHub's anonymous API limit: authenticate the release lookups (test only).
+      - run: |
+          sed -i '' "s|Accept: 'application/vnd.github+json' }|Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + process.env.GH_TOKEN }|" main.js && grep -c GH_TOKEN main.js
+      - name: Install all emulators
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYROCADE_SNAP: ${{ runner.temp }}/emus.png
+          PYROCADE_JS: (async()=>{const r={};for(const e of (await api.emuList()).filter(e=>e.managed)){try{await api.emuInstall(e.id);const s=await api.emuInstall(e.id);r[e.id]={ok:true,exe:s.exe,version:s.installed&&s.installed.version}}catch(x){r[e.id]={ok:false,error:String(x.message)}}}return JSON.stringify(r,null,1)})()
+        run: |
+          npx electron . || true
+          ls data/emulators/*/
+          cat "$PYROCADE_SNAP.txt"
+      - name: Inspect installed programs
+        run: |
+          for app in data/emulators/*/*.app; do
+            bin="$app/Contents/MacOS/$(/usr/bin/plutil -extract CFBundleExecutable raw -o - "$app/Contents/Info.plist")"
+            echo "== $app"; file "$bin" | sed 's/.*: //'; codesign -v "$app" 2>&1 | head -2 || true
+            xattr "$app" | head -3
+          done
+          node -e 'const r=JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/emus.png.txt","utf8"));const bad=Object.entries(r).filter(([,v])=>!v.ok);console.log(Object.keys(r).length+" emulators, "+bad.length+" failed");process.exit(bad.length?1:0)'
