@@ -1,4 +1,4 @@
-# Builds the Windows installer and the Linux packages, smoke-tests Linux, and attaches
+# Builds the Windows installer, the Linux packages and the macOS app, smoke-tests Linux and macOS, and attaches
 # everything to a *draft* GitHub release. Publish the draft when it looks right; installed
 # copies of PyroCade only see published releases.
 name: Release
@@ -74,8 +74,39 @@ jobs:
             ${{ runner.temp }}/*.png
           if-no-files-found: error
 
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: '${{ env.TAG }}' }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      # Universal build (Apple Silicon + Intel), ad-hoc signed: not notarized by Apple.
+      - run: npx electron-builder --mac --publish never
+      - name: Check the app signature
+        run: codesign --verify --deep --strict dist/mac-universal/PyroCade.app
+      - name: Smoke test the app
+        timeout-minutes: 3
+        env:
+          PYROCADE_SNAP: ${{ runner.temp }}/mac.png
+          PYROCADE_JS: (async()=>JSON.stringify({version:await api.appVersion(),emulators:(await api.emuList()).filter(e=>e.managed).length,demo:!document.getElementById('demoBanner').classList.contains('hidden')}))()
+        run: |
+          dist/mac-universal/PyroCade.app/Contents/MacOS/PyroCade
+          cat "$PYROCADE_SNAP.txt"; echo
+          test -s "$PYROCADE_SNAP"
+          grep -q '"emulators":11' "$PYROCADE_SNAP.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: |
+            dist/PyroCade-*-mac-universal.dmg
+            dist/PyroCade-*-mac-universal.zip
+            ${{ runner.temp }}/*.png
+          if-no-files-found: error
+
   release:
-    needs: [windows, linux]
+    needs: [windows, linux, mac]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -85,7 +116,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          files=$(find out -type f \( -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.zst' \))
+          files=$(find out -type f \( -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.zst' -o -name '*.dmg' -o -name '*-mac-universal.zip' \))
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" $files --clobber
           else

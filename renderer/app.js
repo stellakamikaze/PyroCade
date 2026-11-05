@@ -472,7 +472,7 @@ async function renderEmus() {
       else btn('Check for update', () => check(e.id));
     }
     if (e.exe) btn('Open folder', () => api.emuOpenFolder(e.id));
-    btn(e.exe && !e.installed ? 'Change .exe…' : 'Use existing .exe…', async () => { if (await api.emuPickExe(e.id)) { S.config = await api.getConfig(); renderEmus(); } });
+    btn(e.exe && !e.installed ? 'Change program…' : 'Use existing program…', async () => { if (await api.emuPickExe(e.id)) { S.config = await api.getConfig(); renderEmus(); } });
     if (e.installed) btn('Uninstall', async () => { if (confirm(`Remove ${e.name} and its files from PyroCade’s emulators folder?`)) { await api.emuUninstall(e.id); delete S.latest[e.id]; renderEmus(); } });
     grid.append(card);
   }

@@ -17,7 +17,8 @@
     "brand:check": "electron scripts/check-brand.cjs",
     "demo:record": "electron scripts/record-reddit-demo.cjs",
     "dist": "electron-builder --win nsis",
-    "dist:linux": "electron-builder --linux AppImage deb rpm pacman"
+    "dist:linux": "electron-builder --linux AppImage deb rpm pacman",
+    "dist:mac": "electron-builder --mac"
   },
   "devDependencies": {
     "electron": "^39.0.0",
@@ -91,6 +92,29 @@
           "Keywords": "emulator;games;launcher;"
         }
       }
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "renderer/assets/brand/pyrocade-icon-1024.png",
+      "category": "public.app-category.games",
+      "identity": "-",
+      "artifactName": "PyroCade-${version}-mac-universal.${ext}"
+    },
+    "dmg": {
+      "title": "PyroCade ${version}"
     },
     "appImage": {
       "artifactName": "PyroCade-${version}-x86_64.AppImage"

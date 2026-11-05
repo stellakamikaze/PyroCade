@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
 const os = require('os');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 const { pathToFileURL } = require('url');
@@ -316,12 +316,13 @@ function emuDef(id) {
   const base = catalog || config.customEmulators.find(e => e.id === id);
   if (!base) return null;
   const override = config.emulators[id] || {};
-  // On Linux the catalog's "linux" block replaces the Windows download rules. Catalog emulators
-  // without one aren't managed by the downloader there (they can still be linked by hand).
+  // On Linux and macOS the catalog's "linux" / "mac" block replaces the Windows download rules.
+  // Catalog emulators without one aren't managed by the downloader there (they can still be linked by hand).
   let platform = base;
   if (catalog && process.platform !== 'win32') {
-    platform = catalog.linux && process.platform === 'linux'
-      ? { ...catalog, asset: catalog.linux.asset, exe: catalog.linux.exe, source: { ...catalog.source, repo: catalog.linux.repo || catalog.source.repo } }
+    const rules = process.platform === 'darwin' ? catalog.mac : process.platform === 'linux' ? catalog.linux : null;
+    platform = rules
+      ? { ...catalog, asset: rules.asset, exe: rules.exe, source: { ...catalog.source, repo: rules.repo || catalog.source.repo } }
       : { ...catalog, source: undefined };
   }
   // For catalog emulators `exe` is a filename regex used after installing; a program the user
@@ -374,7 +375,7 @@ async function latestRelease(id) {
       assetId: asset.id, assetName: asset.name, size: asset.size, url: asset.browser_download_url, notes: rel.body || '',
     };
   }
-  throw new Error(`No Windows download matching /${def.asset}/ found in recent releases.`);
+  throw new Error(`No ${PLATFORM_NAME} download matching /${def.asset}/ found in recent releases.`);
 }
 
 async function checkUpdate(id) {
@@ -383,22 +384,42 @@ async function checkUpdate(id) {
   return { latest, updateAvailable: !man || man.assetId !== latest.assetId };
 }
 
+// On macOS a program is an .app bundle (a folder): it is matched by name and never searched inside.
+const isMac = process.platform === 'darwin';
+const isBundle = name => isMac && /\.app$/i.test(name);
 function findFile(dir, re) {
   const stack = [dir];
   while (stack.length) {
     const d = stack.shift();
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
-      if (e.isDirectory()) stack.push(p);
+      if (e.isDirectory() && isBundle(e.name)) { if (re.test(e.name)) return p; }
+      else if (e.isDirectory()) stack.push(p);
       else if (re.test(e.name)) return p;
     }
   }
   return null;
 }
 
-// Linux programs (AppImages, binaries) usually have no .exe extension.
-const PROGRAM_FILTERS = process.platform === 'win32' ? [{ name: 'Programs', extensions: ['exe'] }] : [{ name: 'All files', extensions: ['*'] }];
-const ARCHIVE = /\.(zip|7z|tar|tgz|tar\.(gz|xz|zst|bz2))$/i;
+// The program inside a macOS .app bundle (Contents/MacOS/<CFBundleExecutable>). Starting it directly
+// keeps the command-line arguments and lets us see when the game exits.
+function bundleBinary(app) {
+  const dir = path.join(app, 'Contents', 'MacOS');
+  let name = null;
+  try { name = execFileSync('/usr/bin/plutil', ['-extract', 'CFBundleExecutable', 'raw', '-o', '-', path.join(app, 'Contents', 'Info.plist')], { encoding: 'utf8' }).trim(); } catch {}
+  if (name && fs.existsSync(path.join(dir, name))) return path.join(dir, name);
+  const only = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  if (only.length === 1) return path.join(dir, only[0]);
+  throw new Error(`Can't find the program inside ${path.basename(app)}.`);
+}
+const programOf = exe => (isBundle(exe) && fs.statSync(exe).isDirectory() ? bundleBinary(exe) : exe);
+
+const PLATFORM_NAME = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[process.platform] || process.platform;
+// Linux programs (AppImages, binaries) usually have no .exe extension; macOS programs are .app bundles.
+const PROGRAM_FILTERS = process.platform === 'win32' ? [{ name: 'Programs', extensions: ['exe'] }]
+  : isMac ? [{ name: 'Applications', extensions: ['app'] }, { name: 'All files', extensions: ['*'] }]
+  : [{ name: 'All files', extensions: ['*'] }];
+const ARCHIVE = isMac ? /\.(zip|7z|dmg|tar|tgz|tar\.(gz|xz|zst|bz2))$/i : /\.(zip|7z|tar|tgz|tar\.(gz|xz|zst|bz2))$/i;
 function run(cmd, args) {
   return new Promise((res, rej) => {
     const p = spawn(cmd, args, { windowsHide: true });
@@ -408,10 +429,29 @@ function run(cmd, args) {
     p.on('close', c => (c === 0 ? res() : rej(new Error(`Extract failed: ${err.trim() || 'exit ' + c}`))));
   });
 }
+// macOS: ditto keeps the symlinks and permissions inside .app bundles in zips; the built-in
+// bsdtar handles tarballs and 7z; a .dmg is mounted read-only and its apps copied out.
+async function extractMac(archive, dest) {
+  if (/\.zip$/i.test(archive)) return run('/usr/bin/ditto', ['-x', '-k', archive, dest]);
+  if (!/\.dmg$/i.test(archive)) return run('/usr/bin/tar', ['-xf', archive, '-C', dest]);
+  const mount = await fsp.mkdtemp(path.join(os.tmpdir(), 'pyrocade-dmg-'));
+  try {
+    await run('/usr/bin/hdiutil', ['attach', '-nobrowse', '-readonly', '-noverify', '-mountpoint', mount, archive]);
+    try {
+      for (const e of fs.readdirSync(mount, { withFileTypes: true }))
+        if (e.isDirectory() && isBundle(e.name)) await run('/usr/bin/ditto', [path.join(mount, e.name), path.join(dest, e.name)]);
+    } finally {
+      await run('/usr/bin/hdiutil', ['detach', mount, '-force']).catch(() => {});
+    }
+  } finally {
+    fsp.rmdir(mount).catch(() => {}); // only the empty mount point, never a still-mounted volume
+  }
+}
 // Windows has bsdtar built in (handles zip and 7z). On Linux try the usual tools in turn:
 // bsdtar (Arch/SteamOS), unzip / 7z, then GNU tar for tarballs.
 async function extract(archive, dest) {
   if (process.platform === 'win32') return run(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', archive, '-C', dest]);
+  if (isMac) return extractMac(archive, dest);
   const tries = [['bsdtar', ['-xf', archive, '-C', dest]]];
   if (/\.zip$/i.test(archive)) tries.push(['unzip', ['-o', '-q', archive, '-d', dest]], ['7z', ['x', '-y', `-o${dest}`, archive]]);
   else if (/\.7z$/i.test(archive)) tries.push(['7z', ['x', '-y', `-o${dest}`, archive]], ['7za', ['x', '-y', `-o${dest}`, archive]]);
@@ -458,10 +498,10 @@ async function installEmu(id, send) {
       // A single program file (e.g. a Linux AppImage) is used as downloaded.
       await fsp.rename(archive, path.join(stage, rel.assetName));
     }
-    // Flatten a single wrapping folder.
+    // Flatten a single wrapping folder (but never open up a macOS .app bundle).
     let src = stage;
     const top = fs.readdirSync(stage, { withFileTypes: true });
-    if (top.length === 1 && top[0].isDirectory()) src = path.join(stage, top[0].name);
+    if (top.length === 1 && top[0].isDirectory() && !isBundle(top[0].name)) src = path.join(stage, top[0].name);
 
     // Look for the program in the new files only, so an old version left in the folder is never picked.
     const found = findFile(src, new RegExp(def.exe, 'i'));
@@ -469,10 +509,15 @@ async function installEmu(id, send) {
     const exeRel = path.relative(src, found);
     const dest = path.join(EMU_DIR, id);
     await fsp.mkdir(dest, { recursive: true });
+    // macOS emulators keep their settings in ~/Library, not in the bundle: replace the old .app whole,
+    // so files from the previous version never mix with the new one.
+    if (isMac) for (const e of fs.readdirSync(src)) if (isBundle(e)) await fsp.rm(path.join(dest, e), { recursive: true, force: true });
     // Copy over the top so emulator settings / portable folders survive updates.
-    await fsp.cp(src, dest, { recursive: true, force: true });
+    // verbatimSymlinks: bundle frameworks use relative links that must not point back into the temp folder.
+    await fsp.cp(src, dest, { recursive: true, force: true, verbatimSymlinks: true });
     const exe = path.join(dest, exeRel);
-    if (process.platform !== 'win32') await fsp.chmod(exe, 0o755);
+    if (isMac) await run('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', exe]).catch(() => {});
+    if (process.platform !== 'win32') await fsp.chmod(programOf(exe), 0o755);
     // Versioned single-file programs (pcsx2-v2.8.2-….AppImage) would otherwise pile up.
     const old = readManifest(id)?.exe;
     if (old && old !== exeRel && !/[\\/]/.test(old) && /\.appimage$/i.test(old)) await fsp.rm(path.join(dest, old), { force: true });
@@ -508,8 +553,9 @@ function launchGame(gameId) {
   if (!sys) throw new Error('Unknown system');
   const emuId = sys.emulator;
   if (!emuId) throw new Error(`No emulator is set for ${sys.name}. Choose one in Settings.`);
-  const exe = resolveExe(emuId);
-  if (!exe) throw new Error(`${emuDef(emuId)?.name || emuId} isn't installed yet. Install it from the Emulators tab.`);
+  const program = resolveExe(emuId);
+  if (!program) throw new Error(`${emuDef(emuId)?.name || emuId} isn't installed yet. Install it from the Emulators tab.`);
+  const exe = programOf(program);
   const tpl = sys.args || emuDef(emuId).args || '{rom}';
   // split/join instead of replace(): "$&", "$$" etc. in a filename must stay literal.
   const args = splitArgs(tpl).map(a => a.split('{rom}').join(game.romPath));
