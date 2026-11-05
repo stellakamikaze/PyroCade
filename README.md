@@ -27,21 +27,28 @@ On Linux, settings and emulators are kept in `~/.config/PyroCade/data`. The emul
 
 On Ubuntu 24.04 and newer, prefer the .deb: AppImages built with Electron need to be started with `--no-sandbox` there because of Ubuntu's AppArmor rules.
 
+### macOS
+Every release has a universal macOS build that runs natively on Apple Silicon and Intel Macs (macOS 12 or newer): `PyroCade-x.y.z-mac-universal.dmg`. Open it and drag PyroCade to Applications.
+
+The app isn't notarized by Apple yet, so the first time macOS says it can't verify the developer. Click **Done**, then open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to PyroCade. Later starts open normally.
+
+On macOS, settings and emulators are kept in `~/Library/Application Support/PyroCade/data`. The emulator downloader installs the official macOS builds, and *Use existing program…* accepts an app from your Applications folder. Cemu and PCSX2 only publish Intel builds for macOS; on Apple Silicon they run through Rosetta, and PyroCade tells you how to install it if it is missing. PyroCade shows the update banner on macOS; install the new `.dmg` from the release page to update.
+
 ## Run from source
     npm ci
     npm start
 
-Build the installer with `npm run dist` (output in `dist/`).
+Build the installer with `npm run dist` (output in `dist/`). On a Mac, `npm run dist:mac` builds the macOS app.
 
 ## Releasing an update
-Raise `version` in `package.json`, commit, then push a tag `v<version>` (for example `git tag v0.3.0 && git push origin v0.3.0`). The **Release** GitHub Action builds the Windows installer and the Linux packages, smoke-tests Linux, and attaches them to a draft release. Publish the draft, and installed copies offer the update on their next start.
+Raise `version` in `package.json`, commit, then push a tag `v<version>` (for example `git tag v0.3.0 && git push origin v0.3.0`). The **Release** GitHub Action builds the Windows installer, the Linux packages and the macOS app, smoke-tests Linux and macOS, and attaches them to a draft release. Publish the draft, and installed copies offer the update on their next start.
 
 ## Brand assets
 The flame and play-button mark, glass app icon, wordmark and banner are in `renderer/assets/brand/`. The set includes SVG masters, PNG icons from 16 to 1024px, a transparent wordmark and a multi-resolution Windows `.ico`. The header mark follows the selected colour theme. Rebuild the complete set with `npm run brand:build`.
 
 ## Use
 - **Settings**: set a ROM folder for each system, pick its emulator, then click *Save & rescan*.
-- **Emulators**: *Install* downloads the latest Windows build from the project's official GitHub releases into `data/emulators/<id>`. *Check all for updates* compares your copy with the newest release, and updates are copied over the old files so emulator settings survive. *Use existing .exe…* links an emulator you already have. *Add your own emulator* covers anything not in the list (Eden, Dolphin, RetroArch…).
+- **Emulators**: *Install* downloads the latest build for your system (Windows, Linux or macOS) from the project's official GitHub releases into `data/emulators/<id>`. *Check all for updates* compares your copy with the newest release, and updates are copied over the old files so emulator settings survive. *Use existing program…* links an emulator you already have. *Add your own emulator* covers anything not in the list (Eden, Dolphin, RetroArch…).
 - **Library**: ← → to browse, ↑ ↓ to switch system in Carousel/Flipbook, Enter to play, Space to open the case, M for the manual. Vertical stack uses ↑ ↓ to browse; Colour cards uses the arrow keys as a grid. Controllers work too (A play, B back, Y case, X manual, LB/RB system).
 
 ## Library appearance and sound

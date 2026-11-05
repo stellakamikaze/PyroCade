@@ -16,6 +16,10 @@
     "linux": {
       "asset": "^DuckStation-x64.AppImage$",
       "exe": "^DuckStation-x64.AppImage$"
+    },
+    "mac": {
+      "asset": "^duckstation-mac-release\\.zip$",
+      "exe": "^DuckStation.*\\.app$"
     }
   },
   {
@@ -35,6 +39,10 @@
     "linux": {
       "asset": "-linux-appimage-x64-Qt.AppImage$",
       "exe": "-linux-appimage-x64-Qt.AppImage$"
+    },
+    "mac": {
+      "asset": "-macos-Qt\\.tar\\.xz$",
+      "exe": "^PCSX2.*\\.app$"
     }
   },
   {
@@ -55,6 +63,15 @@
       "repo": "RPCS3/rpcs3-binaries-linux",
       "asset": "_linux64.AppImage$",
       "exe": "_linux64.AppImage$"
+    },
+    "mac": {
+      "repo": "RPCS3/rpcs3-binaries-mac",
+      "asset": "_macos\\.7z$",
+      "exe": "^RPCS3.*\\.app$",
+      "arm64": {
+        "repo": "RPCS3/rpcs3-binaries-mac-arm64",
+        "asset": "_macos_aarch64\\.7z$"
+      }
     }
   },
   {
@@ -74,6 +91,10 @@
     "linux": {
       "asset": "^shadps4-linux-sdl-.*.zip$",
       "exe": "^shadps4.*.AppImage$"
+    },
+    "mac": {
+      "asset": "^shadps4-macos-sdl-.*\\.zip$",
+      "exe": "^shadps4$"
     }
   },
   {
@@ -93,6 +114,10 @@
     "linux": {
       "asset": "-anylinux-x86_64.AppImage$",
       "exe": "-anylinux-x86_64.AppImage$"
+    },
+    "mac": {
+      "asset": "^PPSSPPSDL-macOS-.*\\.zip$",
+      "exe": "^PPSSPP.*\\.app$"
     }
   },
   {
@@ -112,6 +137,10 @@
     "linux": {
       "asset": "-x86_64.AppImage$",
       "exe": "-x86_64.AppImage$"
+    },
+    "mac": {
+      "asset": "-macos-12-x64\\.dmg$",
+      "exe": "^Cemu.*\\.app$"
     }
   },
   {
@@ -131,6 +160,10 @@
     "linux": {
       "asset": "^azahar.AppImage$",
       "exe": "^azahar.AppImage$"
+    },
+    "mac": {
+      "asset": "^azahar-macos-universal-.*\\.zip$",
+      "exe": "^Azahar.*\\.app$"
     }
   },
   {
@@ -150,6 +183,10 @@
     "linux": {
       "asset": "-appimage-x86_64.zip$",
       "exe": "^melonDS.*.AppImage$"
+    },
+    "mac": {
+      "asset": "-macOS-universal\\.zip$",
+      "exe": "^melonDS.*\\.app$"
     }
   },
   {
@@ -170,6 +207,10 @@
     "linux": {
       "asset": "-appimage-x64.appimage$",
       "exe": "-appimage-x64.appimage$"
+    },
+    "mac": {
+      "asset": "-macos\\.dmg$",
+      "exe": "^mGBA.*\\.app$"
     }
   },
   {
@@ -189,6 +230,10 @@
     "linux": {
       "asset": "^flycast-x86_64-.*.AppImage$",
       "exe": "^flycast-x86_64-.*.AppImage$"
+    },
+    "mac": {
+      "asset": "^flycast-macOS-.*\\.zip$",
+      "exe": "^Flycast.*\\.app$"
     }
   },
   {
@@ -208,6 +253,10 @@
     "linux": {
       "asset": "^xemu-(?!.*-dbg-).*-x86_64.AppImage$",
       "exe": "^xemu-.*-x86_64.AppImage$"
+    },
+    "mac": {
+      "asset": "^xemu-(?!.*-dbg-).*-macos-universal\\.zip$",
+      "exe": "^xemu.*\\.app$"
     }
   }
 ]

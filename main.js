@@ -6,7 +6,8 @@ const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
 const os = require('os');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
+const { promisify } = require('util');
 const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 const { pathToFileURL } = require('url');
@@ -15,6 +16,7 @@ const {createLaunchBox} = require('./launchbox');
 const {createScreenScraper} = require('./screenscraper');
 
 const ROOT = __dirname;
+const isMac = process.platform === 'darwin';
 // Where settings, installed emulators and artwork live:
 //  - portable build: next to the .exe
 //  - installed build: %APPDATA%\PyroCade\data (the program folder is read-only / inside app.asar)
@@ -393,12 +395,15 @@ function emuDef(id) {
   const base = catalog || config.customEmulators.find(e => e.id === id);
   if (!base) return null;
   const override = config.emulators[id] || {};
-  // On Linux the catalog's "linux" block replaces the Windows download rules. Catalog emulators
-  // without one aren't managed by the downloader there (they can still be linked by hand).
+  // On Linux and macOS the catalog's "linux" / "mac" block replaces the Windows download rules.
+  // Catalog emulators without one aren't managed by the downloader there (they can still be linked by hand).
+  // A block can add per-CPU rules (e.g. "arm64" for a native Apple Silicon build published separately).
   let platform = base;
   if (catalog && process.platform !== 'win32') {
-    platform = catalog.linux && process.platform === 'linux'
-      ? { ...catalog, asset: catalog.linux.asset, exe: catalog.linux.exe, source: { ...catalog.source, repo: catalog.linux.repo || catalog.source.repo } }
+    let rules = isMac ? catalog.mac : process.platform === 'linux' ? catalog.linux : null;
+    if (rules?.[process.arch]) rules = { ...rules, ...rules[process.arch] };
+    platform = rules
+      ? { ...catalog, asset: rules.asset, exe: rules.exe, source: { ...catalog.source, repo: rules.repo || catalog.source.repo } }
       : { ...catalog, source: undefined };
   }
   // A fork (or any other repository) chosen by the user replaces the official download source.
@@ -411,7 +416,7 @@ function emuDef(id) {
     exe = override.exePattern || (forked ? '' : platform.exe);
   }
   // For downloaded emulators `exe` is a filename regex used after installing; a program the user
-  // linked with "Use existing .exe…" is kept separately as exePath so the two never mix.
+  // linked with "Use existing program…" is kept separately as exePath so the two never mix.
   return { ...platform, ...override, exe, source, asset,
     exePath: override.exe || (catalog || base.source ? null : base.exe), custom: !catalog,
     officialRepo: catalog?.source?.repo || null, forked: !!(catalog && override.repo && override.repo !== catalog.source?.repo) };
@@ -436,6 +441,15 @@ function guessAsset(assets) {
   const score = a => {
     const n = a.name.toLowerCase();
     if (/source|src\b|symbols|pdb|debug|[-_.]dbg[-_.]|libretro|\.sha\d*|\.sig$|\.asc$|\.txt$|\.json$/.test(n)) return -1;
+    if (isMac) {
+      // macOS: a mac build in a disk image or archive; universal first, then this CPU. Intel builds
+      // also run on Apple Silicon (through Rosetta), Apple Silicon builds never run on Intel.
+      if (!/(macos|mac|osx|darwin|apple)/.test(n) || !/\.(dmg|zip|7z|tar\.(gz|xz|zst))$/.test(n)) return -1;
+      if (/(windows|win64|\.exe$|linux|appimage|android|ios)/.test(n)) return -1;
+      const arm = /arm64|aarch64|apple-?silicon/.test(n), intel = /x86_64|x64|intel|amd64/.test(n);
+      if (arm && !intel && process.arch !== 'arm64') return -1;
+      return 4 + (/universal/.test(n) || (arm && intel) ? 3 : (process.arch === 'arm64' ? arm : intel) ? 2 : 0) + (/\.(dmg|zip)$/.test(n) ? 1 : 0);
+    }
     if (/arm64|aarch64|armv7|x86(?!_64)|i686|32bit|win32(?!-x64)/.test(n)) return -1;
     let v = 0;
     if (win) {
@@ -464,7 +478,7 @@ function guessProgram(dir, repo) {
     const d = stack.shift();
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
-      if (e.isDirectory()) stack.push(p); else files.push(p);
+      if (e.isDirectory() && !isBundle(e.name)) stack.push(p); else files.push(p); // a macOS .app counts as one program
     }
   }
   const win = process.platform === 'win32';
@@ -472,12 +486,13 @@ function guessProgram(dir, repo) {
   const candidates = files.filter(f => {
     const n = path.basename(f).toLowerCase();
     if (/unins|uninstall|update|crash|redist|vc_?redist|setup|installer|helper|elevate|dxwebsetup/.test(n)) return false;
-    return win ? n.endsWith('.exe') : (n.endsWith('.appimage') || !path.extname(n));
+    return win ? n.endsWith('.exe') : isMac ? (isBundle(n) || !path.extname(n)) : (n.endsWith('.appimage') || !path.extname(n));
   });
   const rank = f => {
     const n = path.basename(f).toLowerCase().replace(/[^a-z0-9]/g, '');
     let v = fs.statSync(f).size / 1e9; // larger programs first, as a tiebreak
-    if (hint && (n.includes(hint) || hint.includes(n.replace(/exe$|appimage$/, '')))) v += 10;
+    if (hint && (n.includes(hint) || hint.includes(n.replace(/exe$|appimage$|app$/, '')))) v += 10;
+    if (isBundle(f)) v += 5; // on macOS the .app, not a helper tool beside it
     if (/qt|gui/.test(n)) v += 1;
     if (/cli|cmd|test|bench/.test(n)) v -= 2;
     return v;
@@ -537,8 +552,7 @@ async function findRelease(repo, { asset: pattern, prerelease }) {
       assetId: asset.id, assetName: asset.name, size: asset.size, url: asset.browser_download_url, notes: rel.body || '',
     };
   }
-  const platformName = process.platform === 'win32' ? 'Windows' : 'Linux';
-  throw new Error(re ? `No ${platformName} download matching /${pattern}/ found in recent releases of ${repo}.` : `No ${platformName} download found in recent releases of ${repo}. Set a download pattern under Source.`);
+  throw new Error(re ? `No ${PLATFORM_NAME} download matching /${pattern}/ found in recent releases of ${repo}.` : `No ${PLATFORM_NAME} download found in recent releases of ${repo}. Set a download pattern under Source.`);
 }
 
 async function checkUpdate(id) {
@@ -547,35 +561,77 @@ async function checkUpdate(id) {
   return { latest, updateAvailable: !man || man.assetId !== latest.assetId };
 }
 
+// On macOS a program is an .app bundle (a folder): it is matched by name and never searched inside.
+const isBundle = name => isMac && /\.app$/i.test(name);
 function findFile(dir, re) {
   const stack = [dir];
   while (stack.length) {
     const d = stack.shift();
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
-      if (e.isDirectory()) stack.push(p);
+      if (e.isDirectory() && isBundle(e.name)) { if (re.test(e.name)) return p; }
+      else if (e.isDirectory()) stack.push(p);
       else if (re.test(e.name)) return p;
     }
   }
   return null;
 }
 
-// Linux programs (AppImages, binaries) usually have no .exe extension.
-const PROGRAM_FILTERS = process.platform === 'win32' ? [{ name: 'Programs', extensions: ['exe'] }] : [{ name: 'All files', extensions: ['*'] }];
-const ARCHIVE = /\.(zip|7z|tar|tgz|tar\.(gz|xz|zst|bz2))$/i;
-function run(cmd, args) {
+// The program inside a macOS .app bundle (Contents/MacOS/<CFBundleExecutable>). Starting it directly
+// keeps the command-line arguments and lets us see when the game exits.
+async function bundleBinary(app) {
+  const dir = path.join(app, 'Contents', 'MacOS');
+  let name = null;
+  try { name = (await promisify(execFile)('/usr/bin/plutil', ['-extract', 'CFBundleExecutable', 'raw', '-o', '-', path.join(app, 'Contents', 'Info.plist')])).stdout.trim(); } catch {}
+  if (name && fs.existsSync(path.join(dir, name))) return path.join(dir, name);
+  const only = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  if (only.length === 1) return path.join(dir, only[0]);
+  throw new Error(`Can't find the program inside ${path.basename(app)}.`);
+}
+const programOf = async exe => (isBundle(exe) && fs.statSync(exe).isDirectory() ? bundleBinary(exe) : exe);
+
+const PLATFORM_NAME = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[process.platform] || process.platform;
+// Linux programs (AppImages, binaries) usually have no .exe extension; macOS programs are .app bundles.
+const PROGRAM_FILTERS = process.platform === 'win32' ? [{ name: 'Programs', extensions: ['exe'] }]
+  : isMac ? [{ name: 'Applications', extensions: ['app'] }, { name: 'All files', extensions: ['*'] }]
+  : [{ name: 'All files', extensions: ['*'] }];
+const ARCHIVE = /\.(zip|7z|dmg|tar|tgz|tar\.(gz|xz|zst|bz2))$/i; // .dmg only comes from macOS rules
+// input: text for the tool's stdin. stdin is always closed, so a tool waiting for an answer fails instead of hanging.
+function run(cmd, args, input = '') {
   return new Promise((res, rej) => {
     const p = spawn(cmd, args, { windowsHide: true });
     let err = '';
     p.stderr.on('data', d => (err += d));
     p.on('error', rej);
     p.on('close', c => (c === 0 ? res() : rej(new Error(`Extract failed: ${err.trim() || 'exit ' + c}`))));
+    p.stdin.on('error', () => {});
+    p.stdin.end(input);
   });
+}
+// macOS: ditto keeps the symlinks and permissions inside .app bundles in zips; the built-in
+// bsdtar handles tarballs and 7z; a .dmg is mounted read-only and its apps copied out.
+async function extractMac(archive, dest) {
+  if (/\.zip$/i.test(archive)) return run('/usr/bin/ditto', ['-x', '-k', archive, dest]);
+  if (!/\.dmg$/i.test(archive)) return run('/usr/bin/tar', ['-xf', archive, '-C', dest]);
+  const mount = await fsp.mkdtemp(path.join(os.tmpdir(), 'pyrocade-dmg-'));
+  try {
+    // A disk image with a licence agreement asks for "Y" on stdin; the user asked to install it.
+    await run('/usr/bin/hdiutil', ['attach', '-nobrowse', '-readonly', '-noverify', '-mountpoint', mount, archive], 'Y\n');
+    try {
+      for (const e of fs.readdirSync(mount, { withFileTypes: true }))
+        if (e.isDirectory() && isBundle(e.name)) await run('/usr/bin/ditto', [path.join(mount, e.name), path.join(dest, e.name)]);
+    } finally {
+      await run('/usr/bin/hdiutil', ['detach', mount, '-force']).catch(() => {});
+    }
+  } finally {
+    fsp.rmdir(mount).catch(() => {}); // only the empty mount point, never a still-mounted volume
+  }
 }
 // Windows has bsdtar built in (handles zip and 7z). On Linux try the usual tools in turn:
 // bsdtar (Arch/SteamOS), unzip / 7z, then GNU tar for tarballs.
 async function extract(archive, dest) {
   if (process.platform === 'win32') return run(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', archive, '-C', dest]);
+  if (isMac) return extractMac(archive, dest);
   const tries = [['bsdtar', ['-xf', archive, '-C', dest]]];
   if (/\.zip$/i.test(archive)) tries.push(['unzip', ['-o', '-q', archive, '-d', dest]], ['7z', ['x', '-y', `-o${dest}`, archive]]);
   else if (/\.7z$/i.test(archive)) tries.push(['7z', ['x', '-y', `-o${dest}`, archive]], ['7za', ['x', '-y', `-o${dest}`, archive]]);
@@ -622,10 +678,10 @@ async function installEmu(id, send) {
       // A single program file (e.g. a Linux AppImage) is used as downloaded.
       await fsp.rename(archive, path.join(stage, rel.assetName));
     }
-    // Flatten a single wrapping folder.
+    // Flatten a single wrapping folder (but never open up a macOS .app bundle).
     let src = stage;
     const top = fs.readdirSync(stage, { withFileTypes: true });
-    if (top.length === 1 && top[0].isDirectory()) src = path.join(stage, top[0].name);
+    if (top.length === 1 && top[0].isDirectory() && !isBundle(top[0].name)) src = path.join(stage, top[0].name);
 
     // Look for the program in the new files only, so an old version left in the folder is never picked.
     const found = def.exe ? findFile(src, new RegExp(def.exe, 'i')) : guessProgram(src, def.source.repo);
@@ -633,13 +689,31 @@ async function installEmu(id, send) {
     const exeRel = path.relative(src, found);
     const dest = path.join(EMU_DIR, id);
     await fsp.mkdir(dest, { recursive: true });
+    // macOS emulators keep their settings in ~/Library, not in the bundle, so each .app is swapped in
+    // whole: the new one is put next to the old one first, so a failed copy never leaves half an app.
+    if (isMac) for (const e of fs.readdirSync(src).filter(isBundle)) {
+      const cur = path.join(dest, e), next = path.join(dest, `.${e}.new`), prev = path.join(dest, `.${e}.old`);
+      await fsp.rm(next, { recursive: true, force: true });
+      await fsp.rename(path.join(src, e), next).catch(err => {
+        if (err.code !== 'EXDEV') throw err; // temp folder on another volume: copy instead of move
+        return fsp.cp(path.join(src, e), next, { recursive: true, verbatimSymlinks: true });
+      });
+      await fsp.rm(prev, { recursive: true, force: true });
+      if (fs.existsSync(cur)) await fsp.rename(cur, prev);
+      await fsp.rename(next, cur);
+      await fsp.rm(prev, { recursive: true, force: true });
+      await fsp.rm(path.join(src, e), { recursive: true, force: true });
+    }
     // Copy over the top so emulator settings / portable folders survive updates.
-    await fsp.cp(src, dest, { recursive: true, force: true });
+    // verbatimSymlinks: relative links must not point back into the temp folder.
+    await fsp.cp(src, dest, { recursive: true, force: true, verbatimSymlinks: true });
     const exe = path.join(dest, exeRel);
-    if (process.platform !== 'win32') await fsp.chmod(exe, 0o755);
-    // Versioned single-file programs (pcsx2-v2.8.2-….AppImage) would otherwise pile up.
+    if (isMac) await run('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', exe]).catch(() => {});
+    if (process.platform !== 'win32') await fsp.chmod(await programOf(exe), 0o755);
+    // Versioned single-file programs (pcsx2-v2.8.2-….AppImage) and macOS bundles (PCSX2-v2.8.2.app)
+    // would otherwise pile up.
     const old = readManifest(id)?.exe;
-    if (old && old !== exeRel && !/[\\/]/.test(old) && /\.appimage$/i.test(old)) await fsp.rm(path.join(dest, old), { force: true });
+    if (old && old !== exeRel && !/[\\/]/.test(old) && (/\.appimage$/i.test(old) || isBundle(old))) await fsp.rm(path.join(dest, old), { recursive: true, force: true });
     const man = { ...rel, exe: exeRel, repo: def.source.repo, installedAt: new Date().toISOString() };
     delete man.notes;
     fs.writeFileSync(manifestPath(id), JSON.stringify(man, null, 2));
@@ -664,7 +738,7 @@ function splitArgs(s) {
 }
 
 let win;
-function launchGame(gameId) {
+async function launchGame(gameId) {
   // The ROM path always comes from the scanned library, never from the renderer.
   const game = libraryGames.find(g => g.id === gameId);
   if (!game) throw new Error('This game is no longer in your library. Rescan in Settings and try again.');
@@ -672,15 +746,18 @@ function launchGame(gameId) {
   if (!sys) throw new Error('Unknown system');
   const emuId = sys.emulator;
   if (!emuId) throw new Error(`No emulator is set for ${sys.name}. Choose one in Settings.`);
-  const exe = resolveExe(emuId);
-  if (!exe) throw new Error(`${emuDef(emuId)?.name || emuId} isn't installed yet. Install it from the Emulators tab.`);
+  const program = resolveExe(emuId);
+  if (!program) throw new Error(`${emuDef(emuId)?.name || emuId} isn't installed yet. Install it from the Emulators tab.`);
+  const exe = await programOf(program);
   const tpl = sys.args || emuDef(emuId).args || '{rom}';
   // split/join instead of replace(): "$&", "$$" etc. in a filename must stay literal.
   const args = splitArgs(tpl).map(a => a.split('{rom}').join(game.romPath));
   return new Promise((resolve, reject) => {
     // detached: the game keeps running if PyroCade is closed or restarted while playing.
     const child = spawn(exe, args, { cwd: path.dirname(exe), detached: true, stdio: 'ignore' });
-    child.once('error', e => reject(new Error(`Launch failed: ${e.message}`)));
+    child.once('error', e => reject(new Error(isMac && e.errno === -86 // EBADARCH: Intel-only app on Apple Silicon
+      ? `${emuDef(emuId)?.name || 'This emulator'} is an Intel app. Install Rosetta (run "softwareupdate --install-rosetta" in Terminal) and try again.`
+      : `Launch failed: ${e.message}`)));
     child.once('spawn', () => {
       // Only hide once the emulator really started, so a failed launch never leaves us minimized.
       if (config.hideWhilePlaying && win && !win.isDestroyed()) {

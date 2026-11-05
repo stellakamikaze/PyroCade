@@ -472,7 +472,7 @@ async function renderEmus() {
       else btn('Check for update', () => check(e.id));
     }
     if (e.exe) btn('Open folder', () => api.emuOpenFolder(e.id));
-    btn(e.exe && !e.installed ? 'Change .exe…' : 'Use existing .exe…', async () => { if (await api.emuPickExe(e.id)) { S.config = await api.getConfig(); renderEmus(); } });
+    btn(e.exe && !e.installed ? 'Change program…' : 'Use existing program…', async () => { if (await api.emuPickExe(e.id)) { S.config = await api.getConfig(); renderEmus(); } });
     if (e.installed) btn('Uninstall', async () => { if (confirm(`Remove ${e.name} and its files from PyroCade’s emulators folder?`)) { await api.emuUninstall(e.id); delete S.latest[e.id]; renderEmus(); } });
     if (e.officialRepo || e.managed) btn(S.sourceOpen === e.id ? 'Close source' : 'Source…', () => { S.sourceOpen = S.sourceOpen === e.id ? null : e.id; renderEmus(); });
     if (e.custom) btn('Remove', async () => { if (confirm(`Remove ${e.name} from PyroCade? Downloaded files stay in the emulators folder until you uninstall them.`)) { await api.emuRemove(e.id); S.config = await api.getConfig(); renderEmus(); } });
@@ -537,7 +537,7 @@ $('#btnCheckAll').onclick = async () => {
 };
 $('#btnAddCustom').onclick = () => $('#customForm').classList.toggle('hidden');
 $('#customCancel').onclick = () => $('#customForm').classList.add('hidden');
-$('#customForm').oninput = () => { $('#customSubmit').textContent = $('#customForm').elements.repo.value.trim() ? 'Add from GitHub' : 'Choose .exe…'; };
+$('#customForm').oninput = () => { $('#customSubmit').textContent = $('#customForm').elements.repo.value.trim() ? 'Add from GitHub' : 'Choose program…'; };
 $('#customForm').onsubmit = async ev => {
   ev.preventDefault();
   const f = new FormData(ev.target), repo = String(f.get('repo') || '').trim();
@@ -546,7 +546,7 @@ $('#customForm').onsubmit = async ev => {
   try { r = repo ? await api.emuAddRepo({ ...details, repo, prerelease: !!f.get('prerelease') }) : await api.emuAddCustom(details); }
   catch (e) { return toast(e.message, 6000); }
   if (r) {
-    ev.target.reset(); ev.target.classList.add('hidden'); $('#customSubmit').textContent = 'Choose .exe…';
+    ev.target.reset(); ev.target.classList.add('hidden'); $('#customSubmit').textContent = 'Choose program…';
     S.config = await api.getConfig(); renderEmus(); renderSettings();
     if (repo) toast(`${r.name} added. Press Install to download it.`);
   }

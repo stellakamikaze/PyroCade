@@ -2,6 +2,14 @@
 
 All notable changes to PyroCade. Downloads are on the [releases page](https://github.com/Pyrodrifter/PyroCade/releases).
 
+## [Unreleased]
+
+### Added
+- **macOS**: a universal `.dmg` that runs natively on Apple Silicon and Intel Macs. The emulator downloader installs the official macOS builds of all 11 catalog emulators (RPCS3 natively on Apple Silicon), and **Use existing program…** accepts an app from the Applications folder. Forks and GitHub emulators get their macOS download and program guessed too.
+
+### Changed
+- Emulator buttons say "program" instead of ".exe", since Linux and macOS programs have no `.exe`.
+
 ## [0.3.0] - 2026-11-05
 
 ### Added
